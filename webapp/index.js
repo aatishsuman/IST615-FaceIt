@@ -2,17 +2,21 @@ let model;
 const webcam = new Webcam(document.getElementById('wc'));
 let isPredicting = false;
 
-(async function init(){
+async function init(){
     document.getElementById("message").innerText = "Loading model ...";
-    await webcam.setup();    
-    model = await tf.loadLayersModel('http://127.0.0.1:8887/model.json');
+    try {
+        await webcam.setup();    
+        model = await tf.loadLayersModel('http://127.0.0.1:8887/model.json');    
+    } catch(e) {
+        console.log(e);
+    }
 	tf.tidy(() => model.predict(webcam.capture()));
     document.getElementById("message").innerText = "Model loaded";
-})().catch(e => {console.log(e)})
+}
 
 init();
 
-(async function predict() {
+async function predict() {
   while (isPredicting) {
     const predictedClass = tf.tidy(() => {
       const img = webcam.capture();
@@ -25,9 +29,13 @@ init();
     predictionText = (classId == 1) ? "with mask" : "without mask"
 	document.getElementById("prediction").innerText = predictionText;
     predictedClass.dispose();
-    await tf.nextFrame();
+    try {
+      await tf.nextFrame();  
+    } catch(e) {
+        console.log(e);
+    }
   }
-})().catch(e => {console.log(e)})
+}
 
 function startPredicting(){
 	isPredicting = true;
