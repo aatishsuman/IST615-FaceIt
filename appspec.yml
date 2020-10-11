@@ -2,11 +2,11 @@ version: 0.0
 os: linux
 files:
   - source: /webapp/index.html
-    destination: /webapp/html/
+    destination: /var/www/html/
   - source: /webapp/index.js
-    destination: /webapp/js/
+    destination: /var/www/html/
   - source: /webapp/webcam.js
-    destination: /webapp/js/
+    destination: /var/www/html/
     
 hooks:
   BeforeInstall:
