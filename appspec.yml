@@ -2,7 +2,7 @@ version: 0.0
 os: linux
 files:
   - source: /webapp/index.html
-    destination: /var/www/html/
+    destination: /var2/www/html/
 hooks:
   BeforeInstall:
     - location: deploy/before_install
