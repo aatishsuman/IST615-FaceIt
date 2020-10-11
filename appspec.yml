@@ -2,7 +2,12 @@ version: 0.0
 os: linux
 files:
   - source: /webapp/index.html
-    destination: /var/www/html/
+    destination: /webapp/html/
+  - source: /webapp/index.js
+    destination: /webapp/js/
+  - source: /webapp/webcam.js
+    destination: /webapp/js/
+    
 hooks:
   BeforeInstall:
     - location: deploy/before_install
