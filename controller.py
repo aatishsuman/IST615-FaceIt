@@ -12,10 +12,10 @@ app = Flask(__name__)
 
 @app.route('/getPrediction/')
 def get_prediction():
-    model = MaskModel()
-    model.load_model('model', 'model')
     prediction = {'class': int(model.predict_from_base64(request.json['image']))}
     print(prediction)
     return prediction
 
+model = MaskModel()
+model.load_model('model', 'model')
 app.run()
