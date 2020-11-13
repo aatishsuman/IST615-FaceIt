@@ -97,8 +97,8 @@ class MaskModel:
 def main():
     IMAGES_DIR = os.path.join('data', 'images')
     BATCH_SIZE = 32
-    VALIDATION_RATIO = 0.1
-    NUM_EPOCHS = 2
+    VALIDATION_RATIO = 0.2
+    NUM_EPOCHS = 5
     model = MaskModel()
     model.train(IMAGES_DIR, BATCH_SIZE, VALIDATION_RATIO, NUM_EPOCHS)
     model.save_model('model', 'model')
