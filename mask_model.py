@@ -7,12 +7,11 @@ Created on Tue Nov 10 21:27:34 2020
 
 import numpy as np
 import os
+import cv2
+import glob
 import tensorflow as tf
 from tensorflow.keras.optimizers import RMSprop
-from tensorflow.keras.preprocessing import image
 import base64
-from io import BytesIO
-from PIL import Image
 
 class MaskModel:
     
@@ -21,44 +20,70 @@ class MaskModel:
         self.IMG_HEIGHT = 256
         self.IMG_WIDTH = 256
         self.AUTOTUNE = tf.data.experimental.AUTOTUNE
+        self.faces = {'with_mask': 0, 'without_mask': 0}
     
-    def get_label(self, file_path):
-        parts = tf.strings.split(file_path, os.path.sep)
-        return 1 if parts[-2] == self.WITH_MASK_DIR else 0
-
-    def decode_img(self, img):
-        img = tf.image.decode_jpeg(img, channels=3)
-        return tf.image.resize(tf.cast(img, tf.float32) / 255., [self.IMG_HEIGHT, self.IMG_WIDTH])
+    def extract_face(self, filename, faces_dir):
+        label = filename.split(os.path.sep)[-2]
+        pixels = cv2.imread(filename)
+        classifier = cv2.CascadeClassifier(os.path.join('model', 'haarcascade_frontalface_default.xml'))
+        bboxes = classifier.detectMultiScale(pixels)
+        try:
+            x, y, width, height = bboxes[0]
+            face = pixels[y: y + height, x: x + width]
+            name = os.path.join(faces_dir, label, filename.split(os.path.sep)[-1])
+            cv2.imwrite(name, cv2.resize(face, (self.IMG_HEIGHT, self.IMG_WIDTH)))
+            cv2.destroyAllWindows()
+            self.faces[label] += 1
+        except:
+            cv2.destroyAllWindows()
     
-    def process_path(self, file_path):
-        label = self.get_label(file_path)
-        img = tf.io.read_file(file_path)
-        img = self.decode_img(img)
-        return tf.data.Dataset.from_tensors((img, label))
+    def generate_faces(self, images_dir, faces_dir):
+        print('Generating faces for training')
+        try:  
+            os.mkdir(faces_dir)
+            os.mkdir(os.path.join(faces_dir, 'with_mask'))
+            os.mkdir(os.path.join(faces_dir, 'without_mask'))
+        except OSError as error:  
+            print(error)
+        images_path = os.path.join(images_dir, 'train') + os.path.sep + '*' + os.path.sep + '*.jpg'
+        [self.extract_face(path, faces_dir) for path in glob.glob(images_path)]
+        print('Total faces generated: ', self.faces)
     
-    def generate_dataset(self, images_dir, batch_size, validation_ratio):
-        list_ds = tf.data.Dataset.list_files(os.path.join(images_dir, 'train') + os.path.sep + '*' + os.path.sep + '*', shuffle=False)
-        image_count = len(list(list_ds))
-        list_ds = list_ds.shuffle(buffer_size=image_count, reshuffle_each_iteration=False)
-        dataset = list_ds.interleave(self.process_path, num_parallel_calls=self.AUTOTUNE)
-        validation_size = int(image_count * validation_ratio)
-        train_dataset = dataset.skip(validation_size).cache().batch(batch_size).prefetch(self.AUTOTUNE)
-        validation_dataset = dataset.take(validation_size).cache().batch(batch_size).prefetch(self.AUTOTUNE)
+    def generate_dataset(self, images_dir, faces_dir, batch_size, validation_ratio):
+        self.generate_faces(images_dir, faces_dir)
+        train_dataset = tf.keras.preprocessing.image_dataset_from_directory(
+          os.path.join(faces_dir),
+          validation_split=validation_ratio,
+          subset='training',
+          seed=42,
+          image_size=(self.IMG_HEIGHT, self.IMG_WIDTH),
+          batch_size=batch_size)        
+        validation_dataset = tf.keras.preprocessing.image_dataset_from_directory(
+          os.path.join(faces_dir),
+          validation_split=validation_ratio,
+          subset='validation',
+          seed=42,
+          image_size=(self.IMG_HEIGHT, self.IMG_WIDTH),
+          batch_size=batch_size)
+        train_dataset = train_dataset.cache().prefetch(buffer_size=self.AUTOTUNE)
+        validation_dataset = validation_dataset.cache().prefetch(buffer_size=self.AUTOTUNE)
         return train_dataset, validation_dataset
     
     def create_model(self):
         self.model = tf.keras.models.Sequential([tf.keras.layers.Conv2D(16, (3, 3), activation='relu', input_shape=(self.IMG_HEIGHT, self.IMG_WIDTH, 3)),
                                             tf.keras.layers.MaxPooling2D(2, 2),
                                             tf.keras.layers.Conv2D(32, (3, 3), activation='relu'),
+                                            tf.keras.layers.Dropout(0.2),
                                             tf.keras.layers.MaxPooling2D(2, 2),
+                                            tf.keras.layers.Dropout(0.2),
                                             tf.keras.layers.Flatten(),
                                             tf.keras.layers.Dense(512, activation='relu'),
                                             tf.keras.layers.Dense(1, activation='sigmoid')])
         self.model.compile(optimizer=RMSprop(lr=0.001), loss='binary_crossentropy', metrics=['acc'])
         print(self.model.summary())
     
-    def train(self, images_dir, batch_size, validation_ratio, num_epochs):
-        train_dataset, validation_dataset = self.generate_dataset(images_dir, batch_size, validation_ratio)
+    def train(self, images_dir, faces_dir, batch_size, validation_ratio, num_epochs):
+        train_dataset, validation_dataset = self.generate_dataset(images_dir, faces_dir, batch_size, validation_ratio)
         self.create_model()
         return self.model.fit(train_dataset, epochs=num_epochs, validation_data=validation_dataset)
     
@@ -81,26 +106,42 @@ class MaskModel:
         file_names = os.listdir(test_dir)
         results = []
         for file_name in file_names:
-            img = image.load_img(os.path.join(test_dir, file_name), target_size=(self.IMG_HEIGHT, self.IMG_WIDTH))
-            img = image.img_to_array(img)
-            img = np.expand_dims(img, axis=0)
+            pixels = cv2.resize(cv2.imread(os.path.join(test_dir, file_name)), (self.IMG_HEIGHT, self.IMG_WIDTH))
+            classifier = cv2.CascadeClassifier(os.path.join('model', 'haarcascade_frontalface_default.xml'))
+            bboxes = classifier.detectMultiScale(pixels)
+            try:
+                x, y, width, height = bboxes[0]
+                face = pixels[y: y + height, x: x + width]
+            except:
+                face = pixels
+            img = cv2.resize(face, (self.IMG_HEIGHT, self.IMG_WIDTH))
+            img = np.expand_dims(np.asarray(img), axis=0)
             img = np.vstack([img])
-            results.append((file_name, self.model.predict(img)[0]))
+            results.append(int(self.model.predict(img)[0] > 0.5))
         return results
     
     def predict_from_base64(self, img_str):
-        img = image.img_to_array(Image.open(BytesIO(base64.b64decode(img_str))).resize((self.IMG_HEIGHT, self.IMG_WIDTH)))
-        img = np.expand_dims(img, axis=0)
+        pixels = cv2.resize(cv2.imdecode(np.frombuffer(base64.b64decode(img_str), dtype=np.uint8), 1), (self.IMG_HEIGHT, self.IMG_WIDTH))
+        classifier = cv2.CascadeClassifier(os.path.join('model', 'haarcascade_frontalface_default.xml'))
+        bboxes = classifier.detectMultiScale(pixels)
+        try:
+            x, y, width, height = bboxes[0]
+            face = pixels[y: y + height, x: x + width]
+        except:
+            face = pixels
+        img = cv2.resize(face, (self.IMG_HEIGHT, self.IMG_WIDTH))
+        img = np.expand_dims(np.asarray(img), axis=0)
         img = np.vstack([img])
-        return self.model.predict(img)[0]
+        return int(self.model.predict(img)[0] > 0.5)
     
 def main():
     IMAGES_DIR = os.path.join('data', 'images')
+    FACES_DIR = os.path.join(IMAGES_DIR, 'train', 'faces')
     BATCH_SIZE = 32
     VALIDATION_RATIO = 0.2
-    NUM_EPOCHS = 5
+    NUM_EPOCHS = 2
     model = MaskModel()
-    model.train(IMAGES_DIR, BATCH_SIZE, VALIDATION_RATIO, NUM_EPOCHS)
+    model.train(IMAGES_DIR, FACES_DIR, BATCH_SIZE, VALIDATION_RATIO, NUM_EPOCHS)
     model.save_model('model', 'model')
 
 if __name__ == '__main__':
